@@ -6,30 +6,56 @@ import https from "https";
 import http from "http";
 import unzipper from "unzipper";
 import { createExtractorFromData } from "node-unrar-js";
-import ffmpeg from "fluent-ffmpeg";
 import crypto from "crypto";
 import { execFile } from "child_process";
 import { resolveFFmpegPath } from "@/lib/ffmpeg";
 
-const FFMPEG_PATH = resolveFFmpegPath();
-ffmpeg.setFfmpegPath(FFMPEG_PATH);
+let FFMPEG_PATH: string;
+try { FFMPEG_PATH = resolveFFmpegPath(); } catch { FFMPEG_PATH = "ffmpeg"; }
 
 const DOWNLOADS_DIR = path.join(process.cwd(), "data", "downloads");
 const MEDIA_DIR = path.join(process.cwd(), "data", "media");
 const THUMB_DIR = path.join(process.cwd(), "data", "thumbnails");
+const CACHE_FILE = path.join(process.cwd(), "data", "duration_cache.json");
 
 const VIDEO_EXTS = [".mp4", ".webm", ".avi", ".mkv", ".flv", ".wmv", ".mov", ".m4v"];
+const AUDIO_EXTS = [".mp3", ".ogg", ".wav", ".m4a", ".flac", ".aac", ".wma"];
+const ALL_MEDIA = [...VIDEO_EXTS, ...AUDIO_EXTS];
 
 export const maxDuration = 300;
 
-async function generateThumbnail(videoPath: string): Promise<void> {
+// ── Duration cache ──
+function loadDurationCache(): Record<string, number> {
+  try { if (fs.existsSync(CACHE_FILE)) return JSON.parse(fs.readFileSync(CACHE_FILE, "utf-8")); } catch {}
+  return {};
+}
+function saveDurationCache(cache: Record<string, number>) {
+  try { fs.writeFileSync(CACHE_FILE, JSON.stringify(cache), "utf-8"); } catch {}
+}
+function getCacheKey(filePath: string): string {
+  const stat = fs.statSync(filePath);
+  return crypto.createHash("md5").update(`${filePath}|${stat.size}|${stat.mtimeMs}`).digest("hex");
+}
+
+// ── Get duration of a media file ──
+function getDuration(filePath: string): Promise<number> {
+  return new Promise((resolve) => {
+    execFile(FFMPEG_PATH, ["-i", filePath, "-f", "null", "-"], { timeout: 15000 },
+      (_e, _o, stderr) => {
+        const m = (stderr || "").match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/);
+        resolve(m ? Math.floor(parseInt(m[1]) * 3600 + parseInt(m[2]) * 60 + parseFloat(m[3])) : 0);
+      });
+  });
+}
+
+// ── Generate thumbnail ──
+function generateThumbnail(videoPath: string): Promise<void> {
   const hash = crypto.createHash("md5").update(videoPath).digest("hex");
   const thumbPath = path.join(THUMB_DIR, `${hash}.jpg`);
-  if (fs.existsSync(thumbPath)) return;
+  if (fs.existsSync(thumbPath)) return Promise.resolve();
 
   return new Promise<void>((resolve) => {
-    execFile(
-      FFMPEG_PATH,
+    execFile(FFMPEG_PATH,
       ["-i", videoPath, "-ss", "00:00:03", "-vframes", "1",
        "-vf", "scale=320:180:force_original_aspect_ratio=decrease,pad=320:180:(ow-iw)/2:(oh-ih)/2",
        "-q:v", "5", "-y", thumbPath],
@@ -42,25 +68,50 @@ async function generateThumbnail(videoPath: string): Promise<void> {
   });
 }
 
-async function generateAllThumbnails(dir: string, send: (msg: string, p: number) => void): Promise<void> {
+// ── Process all media: thumbnails + durations ──
+async function processAllMedia(dir: string, send: (msg: string, p: number) => void): Promise<void> {
   await fse.ensureDir(THUMB_DIR);
-  const videos: string[] = [];
+
+  const mediaFiles: string[] = [];
   function scan(d: string) {
     if (!fs.existsSync(d)) return;
     for (const e of fs.readdirSync(d)) {
       const f = path.join(d, e);
       if (fs.statSync(f).isDirectory()) scan(f);
-      else if (VIDEO_EXTS.includes(path.extname(f).toLowerCase())) videos.push(f);
+      else if (ALL_MEDIA.includes(path.extname(f).toLowerCase())) mediaFiles.push(f);
     }
   }
   scan(dir);
-  if (videos.length === 0) return;
-  send(`🖼️ جاري توليد صور مصغرة لـ ${videos.length} فيديو...`, 92);
-  for (let i = 0; i < videos.length; i++) {
-    await generateThumbnail(videos[i]);
-    if ((i + 1) % 3 === 0 || i === videos.length - 1)
-      send(`🖼️ تم توليد ${i + 1}/${videos.length} صورة مصغرة`, 92 + Math.floor(((i + 1) / videos.length) * 6));
+
+  if (mediaFiles.length === 0) return;
+
+  send(`⚙️ جاري معالجة ${mediaFiles.length} ملف (صور مصغرة + مدد)...`, 91);
+
+  const cache = loadDurationCache();
+
+  for (let i = 0; i < mediaFiles.length; i++) {
+    const f = mediaFiles[i];
+    const ext = path.extname(f).toLowerCase();
+    const isVideo = VIDEO_EXTS.includes(ext);
+
+    // Generate thumbnail for videos
+    if (isVideo) {
+      await generateThumbnail(f);
+    }
+
+    // Cache duration
+    const key = getCacheKey(f);
+    if (cache[key] === undefined) {
+      cache[key] = await getDuration(f);
+    }
+
+    // Progress update every 3 files
+    if ((i + 1) % 3 === 0 || i === mediaFiles.length - 1) {
+      send(`⚙️ ${i + 1}/${mediaFiles.length} ملف...`, 91 + Math.floor(((i + 1) / mediaFiles.length) * 8));
+    }
   }
+
+  saveDurationCache(cache);
 }
 
 export async function POST(req: NextRequest) {
@@ -137,8 +188,11 @@ export async function POST(req: NextRequest) {
 
         send("🗑️ جاري حذف الأرشيف...", 91);
         await fse.remove(tempPath);
-        await generateAllThumbnails(extractDir, send);
-        send("🎉 تمت العملية بنجاح!", 100);
+
+        // Generate ALL metadata: thumbnails + durations (everything ready before player)
+        await processAllMedia(extractDir, send);
+
+        send("🎉 تمت العملية بنجاح! كل شيء جاهز.", 100);
         controller.close();
       } catch (err: any) {
         console.error("Process error:", err);

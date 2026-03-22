@@ -124,12 +124,10 @@ export default function PlayerPage() {
 
   return (
     <main className="min-h-screen p-3 md:p-6" dir="rtl">
-      <div className="max-w-[1600px] mx-auto flex flex-col lg:flex-row-reverse gap-4" dir="rtl">
-        {/* Player */}
+      <div className="max-w-[1600px] mx-auto flex flex-col lg:flex-row-reverse lg:items-start gap-4" dir="rtl">
         <div className="flex-1 min-w-0"><InlinePlayer file={activeFile} onEnded={handleEnded} /></div>
 
-        {/* Sidebar */}
-        <div className="lg:w-[440px] shrink-0 flex flex-col bg-surface-raised rounded-2xl border border-border overflow-hidden">
+        <div className="lg:w-[440px] shrink-0 flex flex-col bg-surface-raised rounded-2xl border border-border overflow-hidden lg:max-h-[calc(56.25vw*0.65+120px)] lg:sticky lg:top-6">
           <div className="p-4 border-b border-border space-y-3">
             <div className="relative">
               <FaSearch className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted text-xs" />
@@ -150,7 +148,7 @@ export default function PlayerPage() {
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-2 space-y-1 max-h-[calc(100vh-200px)]">
+          <div className="flex-1 overflow-y-auto p-2 space-y-1">
             {filtered.length === 0 ? (
               <div className="text-center py-8 text-text-muted text-sm">لا توجد نتائج</div>
             ) : (

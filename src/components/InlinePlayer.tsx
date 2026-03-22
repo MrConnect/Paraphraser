@@ -2,13 +2,8 @@
 
 import { useRef, useState, useEffect, useCallback } from "react";
 import {
-  FaPlay,
-  FaPause,
-  FaVolumeUp,
-  FaVolumeMute,
-  FaExpand,
-  FaStepForward,
-  FaStepBackward,
+  FaPlay, FaPause, FaVolumeUp, FaVolumeMute, FaExpand,
+  FaStepForward, FaStepBackward, FaCog,
 } from "react-icons/fa";
 
 interface MediaFile {
@@ -18,28 +13,57 @@ interface MediaFile {
   ext: string;
 }
 
-export default function InlinePlayer({
-  file,
-  onEnded,
-}: {
-  file: MediaFile | null;
-  onEnded?: () => void;
-}) {
+const QUALITY_OPTIONS = [
+  { label: "144p", value: "144" },
+  { label: "240p", value: "240" },
+  { label: "360p", value: "360" },
+  { label: "480p", value: "480" },
+  { label: "720p", value: "720" },
+  { label: "1080p", value: "1080" },
+  { label: "أصلي", value: "original" },
+];
+
+const DEFAULT_QUALITY = "360";
+
+function getStoredQuality(): string {
+  if (typeof window === "undefined") return DEFAULT_QUALITY;
+  return localStorage.getItem("player_quality") || DEFAULT_QUALITY;
+}
+
+function storeQuality(q: string) {
+  if (typeof window !== "undefined") localStorage.setItem("player_quality", q);
+}
+
+export default function InlinePlayer({ file, onEnded }: { file: MediaFile | null; onEnded?: () => void }) {
   const mediaRef = useRef<HTMLVideoElement | HTMLAudioElement | null>(null);
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrent] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
+  const [quality, setQuality] = useState(getStoredQuality);
+  const [showQMenu, setShowQMenu] = useState(false);
 
-  const src = file ? `/api/stream?path=${encodeURIComponent(file.path)}` : "";
   const isVideo = file?.type === "video";
+
+  // Build stream URL with quality param for video
+  const src = file
+    ? `/api/stream?path=${encodeURIComponent(file.path)}${isVideo ? `&q=${quality}` : ""}`
+    : "";
 
   useEffect(() => {
     setPlaying(false);
     setCurrent(0);
     setDuration(0);
+    setShowQMenu(false);
   }, [file]);
+
+  const changeQuality = (q: string) => {
+    setQuality(q);
+    storeQuality(q);
+    setShowQMenu(false);
+    // Video will reload via src change
+  };
 
   const togglePlay = useCallback(() => {
     const el = mediaRef.current;
@@ -101,6 +125,14 @@ export default function InlinePlayer({
     return () => window.removeEventListener("keydown", handler);
   }, [togglePlay, skip, goFullscreen]);
 
+  // Close quality menu on outside click
+  useEffect(() => {
+    if (!showQMenu) return;
+    const close = () => setShowQMenu(false);
+    setTimeout(() => document.addEventListener("click", close), 0);
+    return () => document.removeEventListener("click", close);
+  }, [showQMenu]);
+
   if (!file) {
     return (
       <div className="bg-surface-raised rounded-2xl border border-border aspect-video flex items-center justify-center">
@@ -144,16 +176,9 @@ export default function InlinePlayer({
         <div className="flex items-center gap-3 text-xs text-text-secondary">
           <span className="w-12 text-left font-mono">{fmt(currentTime)}</span>
           <input
-            type="range"
-            min={0}
-            max={duration || 1}
-            step={0.1}
-            value={currentTime}
-            onChange={(e) => seek(parseFloat(e.target.value))}
-            className="flex-1"
-            style={{
-              background: `linear-gradient(to right, var(--color-accent) ${(currentTime / (duration || 1)) * 100}%, var(--color-surface-overlay) ${(currentTime / (duration || 1)) * 100}%)`,
-            }}
+            type="range" min={0} max={duration || 1} step={0.1} value={currentTime}
+            onChange={(e) => seek(parseFloat(e.target.value))} className="flex-1"
+            style={{ background: `linear-gradient(to right, var(--color-accent) ${(currentTime / (duration || 1)) * 100}%, var(--color-surface-overlay) ${(currentTime / (duration || 1)) * 100}%)` }}
           />
           <span className="w-12 text-right font-mono">{fmt(duration)}</span>
         </div>
@@ -161,16 +186,13 @@ export default function InlinePlayer({
         {/* Buttons */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1">
-            <button onClick={() => skip(-10)} className="text-text-secondary hover:text-text-primary p-2 rounded-lg transition text-sm" title="-10 ثانية">
+            <button onClick={() => skip(-10)} className="text-text-secondary hover:text-text-primary p-2 rounded-lg transition text-sm" title="-10s">
               <FaStepBackward />
             </button>
-            <button
-              onClick={togglePlay}
-              className="bg-accent hover:bg-accent-hover text-white w-10 h-10 rounded-full flex items-center justify-center transition text-sm"
-            >
+            <button onClick={togglePlay} className="bg-accent hover:bg-accent-hover text-white w-10 h-10 rounded-full flex items-center justify-center transition text-sm">
               {playing ? <FaPause /> : <FaPlay />}
             </button>
-            <button onClick={() => skip(10)} className="text-text-secondary hover:text-text-primary p-2 rounded-lg transition text-sm" title="+10 ثانية">
+            <button onClick={() => skip(10)} className="text-text-secondary hover:text-text-primary p-2 rounded-lg transition text-sm" title="+10s">
               <FaStepForward />
             </button>
           </div>
@@ -179,16 +201,42 @@ export default function InlinePlayer({
             <button onClick={toggleMute} className="text-text-secondary hover:text-text-primary p-2 rounded-lg transition text-sm">
               {muted || volume === 0 ? <FaVolumeMute /> : <FaVolumeUp />}
             </button>
-            <input
-              type="range"
-              min={0} max={1} step={0.05}
-              value={muted ? 0 : volume}
-              onChange={(e) => changeVolume(parseFloat(e.target.value))}
-              className="w-20"
-              style={{
-                background: `linear-gradient(to right, var(--color-accent) ${(muted ? 0 : volume) * 100}%, var(--color-surface-overlay) ${(muted ? 0 : volume) * 100}%)`,
-              }}
+            <input type="range" min={0} max={1} step={0.05} value={muted ? 0 : volume}
+              onChange={(e) => changeVolume(parseFloat(e.target.value))} className="w-20"
+              style={{ background: `linear-gradient(to right, var(--color-accent) ${(muted ? 0 : volume) * 100}%, var(--color-surface-overlay) ${(muted ? 0 : volume) * 100}%)` }}
             />
+
+            {/* Quality selector — video only */}
+            {isVideo && (
+              <div className="relative">
+                <button
+                  onClick={(e) => { e.stopPropagation(); setShowQMenu(p => !p); }}
+                  className="text-text-secondary hover:text-text-primary p-2 rounded-lg transition text-xs flex items-center gap-1"
+                  title="الجودة"
+                >
+                  <FaCog />
+                  <span className="text-[10px] font-mono">{quality === "original" ? "HD" : quality + "p"}</span>
+                </button>
+                {showQMenu && (
+                  <div className="absolute bottom-full right-0 mb-2 bg-surface-overlay border border-border rounded-xl shadow-xl py-1 min-w-[100px] z-50">
+                    {QUALITY_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.value}
+                        onClick={(e) => { e.stopPropagation(); changeQuality(opt.value); }}
+                        className={`w-full text-left px-3 py-1.5 text-xs transition ${
+                          quality === opt.value
+                            ? "text-accent bg-accent/10 font-bold"
+                            : "text-text-secondary hover:text-text-primary hover:bg-surface-raised"
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {isVideo && (
               <button onClick={goFullscreen} className="text-text-secondary hover:text-text-primary p-2 rounded-lg transition text-sm" title="ملء الشاشة">
                 <FaExpand />

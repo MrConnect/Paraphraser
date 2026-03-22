@@ -5,34 +5,60 @@ import { PassThrough } from "stream";
 import ffmpeg from "fluent-ffmpeg";
 import { resolveFFmpegPath } from "@/lib/ffmpeg";
 
-const FFMPEG_PATH = resolveFFmpegPath();
+let FFMPEG_PATH: string;
+try { FFMPEG_PATH = resolveFFmpegPath(); } catch { FFMPEG_PATH = "ffmpeg"; }
 ffmpeg.setFfmpegPath(FFMPEG_PATH);
 
 const MEDIA_DIR = path.join(process.cwd(), "data", "media");
 const GOOD_DIR = path.join(process.cwd(), "data", "good");
-const TRANSCODE_EXTS = [".avi", ".mkv", ".flv", ".wmv", ".mov", ".m4v"];
+
+// Quality → height mapping
+const QUALITY_MAP: Record<string, number> = {
+  "144": 144, "240": 240, "360": 360, "480": 480, "720": 720, "1080": 1080,
+};
 
 export async function GET(req: NextRequest) {
-  const filePath = new URL(req.url).searchParams.get("path");
+  const url = new URL(req.url);
+  const filePath = url.searchParams.get("path");
+  const quality = url.searchParams.get("q"); // e.g. "360", "720", "original"
+
   if (!filePath) return new NextResponse("Missing path", { status: 400 });
 
   const full = path.resolve(path.join(process.cwd(), filePath));
 
-  // Allow streaming from both media and good directories
   if (!full.startsWith(path.resolve(MEDIA_DIR)) && !full.startsWith(path.resolve(GOOD_DIR))) {
     return new NextResponse("Forbidden", { status: 403 });
   }
   if (!fs.existsSync(full)) return new NextResponse("Not found", { status: 404 });
 
   const ext = path.extname(full).toLowerCase();
+  const isAudio = [".mp3", ".ogg", ".wav", ".m4a", ".flac", ".aac", ".wma"].includes(ext);
 
-  if (TRANSCODE_EXTS.includes(ext)) {
+  // Audio: always direct stream
+  if (isAudio) {
+    return serveDirectFile(req, full, ext);
+  }
+
+  // Video: transcode if quality requested (not "original") or if format needs transcoding
+  const needsTranscode = [".avi", ".mkv", ".flv", ".wmv", ".mov", ".m4v"].includes(ext);
+  const targetHeight = quality && quality !== "original" ? QUALITY_MAP[quality] : null;
+
+  if (targetHeight || needsTranscode) {
     const pass = new PassThrough();
-    ffmpeg(full)
-      .format("mp4").videoCodec("libx264").audioCodec("aac")
-      .outputOptions(["-movflags", "frag_keyframe+empty_moov+faststart", "-preset", "ultrafast"])
-      .on("error", (err) => { if (!err.message?.includes("Output stream closed")) console.error("FFmpeg:", err.message); })
-      .pipe(pass);
+    const cmd = ffmpeg(full)
+      .format("mp4")
+      .videoCodec("libx264")
+      .audioCodec("aac")
+      .outputOptions(["-movflags", "frag_keyframe+empty_moov+faststart", "-preset", "ultrafast"]);
+
+    if (targetHeight) {
+      // Scale to height, keep aspect ratio, even dimensions
+      cmd.outputOptions(["-vf", `scale=-2:${targetHeight}`]);
+    }
+
+    cmd.on("error", (err) => {
+      if (!err.message?.includes("Output stream closed")) console.error("FFmpeg:", err.message);
+    }).pipe(pass);
 
     const readable = new ReadableStream({
       start(c) { pass.on("data", (d: any) => c.enqueue(new Uint8Array(d))); pass.on("end", () => c.close()); pass.on("error", (e) => c.error(e)); },
@@ -41,6 +67,11 @@ export async function GET(req: NextRequest) {
     return new NextResponse(readable, { headers: { "Content-Type": "video/mp4", "Transfer-Encoding": "chunked" } });
   }
 
+  // MP4/WebM without quality change: direct stream with Range support
+  return serveDirectFile(req, full, ext);
+}
+
+function serveDirectFile(req: NextRequest, full: string, ext: string) {
   const stat = fs.statSync(full);
   const size = stat.size;
   const range = req.headers.get("range");
