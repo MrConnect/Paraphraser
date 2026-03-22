@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { FaTrash, FaArrowRight, FaVideo, FaVolumeUp } from "react-icons/fa";
+import { FaTrash, FaArrowRight, FaVideo, FaVolumeUp, FaFileArchive, FaSpinner, FaDownload } from "react-icons/fa";
 import Link from "next/link";
 import { fetchWithTimeout } from "@/lib/fetch";
 
@@ -36,6 +36,8 @@ export default function BadPage() {
   const [files, setFiles] = useState<BadFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const [zipping, setZipping] = useState(false);
+  const [zipInfo, setZipInfo] = useState<{ id: string; name: string; downloadUrl: string } | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -68,6 +70,13 @@ export default function BadPage() {
 
   const visibleItems = files.slice(0, visibleCount);
 
+  const handleDownloadSingle = (file: BadFile) => {
+    const a = document.createElement("a");
+    a.href = `/api/download?file=${encodeURIComponent(file.path)}`;
+    a.download = file.name;
+    a.click();
+  };
+
   const handleRemove = async (file: BadFile, permanent: boolean) => {
     const msg = permanent ? `حذف "${file.name}" نهائياً؟` : `إرجاع "${file.name}" للقائمة الرئيسية؟`;
     if (!confirm(msg)) return;
@@ -83,6 +92,21 @@ export default function BadPage() {
       try { await fetchWithTimeout("/api/bad", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ filePath: f.path, permanent: true }) }); } catch {}
     }
     await fetchFiles();
+  };
+
+  const handleDownloadAll = async () => {
+    setZipping(true);
+    try {
+      const res = await fetchWithTimeout("/api/download", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source: "bad" }), timeout: 300000 });
+      const data = await res.json();
+      if (data.error) { alert(data.error); return; }
+      setZipInfo(data);
+      const a = document.createElement("a");
+      a.href = data.downloadUrl;
+      a.download = data.name;
+      a.click();
+    } catch { alert("فشل إنشاء الأرشيف"); }
+    finally { setZipping(false); }
   };
 
   const totalSize = files.reduce((a, f) => a + f.size, 0);
@@ -106,6 +130,23 @@ export default function BadPage() {
             </Link>
           </div>
         </div>
+
+        {files.length > 0 && (
+          <div className="flex flex-wrap gap-3">
+            <button onClick={handleDownloadAll} disabled={zipping}
+              className="bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white px-5 py-2.5 rounded-xl font-semibold flex items-center gap-2 transition-colors">
+              {zipping ? <><FaSpinner className="animate-spin" /> جاري الضغط...</> : <><FaFileArchive /> تحميل الكل كـ ZIP</>}
+            </button>
+          </div>
+        )}
+
+        {zipInfo && (
+          <div className="bg-red-600/10 border border-red-500/30 p-4 rounded-xl text-sm">
+            <p className="text-red-400 font-semibold">✅ تم إنشاء الأرشيف: {zipInfo.name}</p>
+            <p className="text-text-muted mt-1">الرابط يدعم الاستئناف وصالح لمدة 96 ساعة</p>
+            <a href={zipInfo.downloadUrl} download className="text-accent hover:underline mt-2 inline-block">اضغط هنا للتحميل مرة أخرى ↓</a>
+          </div>
+        )}
 
         {files.length === 0 ? (
           <div className="text-center py-20 bg-surface-raised/50 rounded-2xl border border-border/30">
@@ -135,8 +176,15 @@ export default function BadPage() {
                 </div>
 
                 <div className="flex gap-1 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity shrink-0">
-                  <button onClick={() => handleRemove(file, false)} className="text-yellow-400 hover:bg-yellow-500/10 p-2 rounded-lg transition" title="إرجاع للقائمة"><FaArrowRight /></button>
-                  <button onClick={() => handleRemove(file, true)} className="text-danger hover:bg-danger/10 p-2 rounded-lg transition" title="حذف نهائي"><FaTrash /></button>
+                  <button onClick={() => handleDownloadSingle(file)} className="text-accent hover:bg-accent/10 p-2 rounded-lg transition" title="تحميل">
+                    <FaDownload />
+                  </button>
+                  <button onClick={() => handleRemove(file, false)} className="text-yellow-400 hover:bg-yellow-500/10 p-2 rounded-lg transition" title="إرجاع للمشغل">
+                    <FaArrowRight />
+                  </button>
+                  <button onClick={() => handleRemove(file, true)} className="text-danger hover:bg-danger/10 p-2 rounded-lg transition" title="حذف نهائي">
+                    <FaTrash />
+                  </button>
                 </div>
               </div>
             ))}

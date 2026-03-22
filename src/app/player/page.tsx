@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { FaSearch, FaBroom, FaCloudDownloadAlt, FaStar, FaBan } from "react-icons/fa";
+import { FaSearch, FaBroom, FaCloudDownloadAlt, FaStar, FaBan, FaFileArchive, FaSpinner } from "react-icons/fa";
 import dynamic from "next/dynamic";
 import PlaylistItem from "@/components/PlaylistItem";
 import Link from "next/link";
@@ -32,6 +32,8 @@ export default function PlayerPage() {
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const [zipping, setZipping] = useState(false);
+  const [zipInfo, setZipInfo] = useState<{ id: string; name: string; downloadUrl: string } | null>(null);
 
   const fetchFiles = useCallback(async () => {
     // Abort previous request
@@ -114,6 +116,21 @@ export default function PlayerPage() {
     } catch { alert("فشل"); }
   };
 
+  const handleDownloadAll = async () => {
+    setZipping(true);
+    try {
+      const res = await fetchWithTimeout("/api/download", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source: "media" }), timeout: 300000 });
+      const data = await res.json();
+      if (data.error) { alert(data.error); return; }
+      setZipInfo(data);
+      const a = document.createElement("a");
+      a.href = data.downloadUrl;
+      a.download = data.name;
+      a.click();
+    } catch { alert("فشل إنشاء الأرشيف"); }
+    finally { setZipping(false); }
+  };
+
   const videoCount = files.filter(f => f.type === "video").length;
   const audioCount = files.filter(f => f.type === "audio").length;
 
@@ -152,6 +169,9 @@ export default function PlayerPage() {
                 <Link href="/bad" className="text-[11px] text-red-400 hover:text-red-300 flex items-center gap-1 transition"><FaBan /> Bad</Link>
                 <Link href="/" className="text-[11px] text-accent hover:text-accent-hover transition">+ تحميل</Link>
                 <button onClick={handleDeleteAll} className="text-[11px] text-danger hover:text-danger-hover flex items-center gap-1 transition"><FaBroom /> حذف الكل</button>
+                <button onClick={handleDownloadAll} disabled={zipping} className="text-[11px] text-green-500 hover:text-green-400 flex items-center gap-1 transition disabled:opacity-50">
+                  {zipping ? <><FaSpinner className="animate-spin" /> ZIP...</> : <><FaFileArchive /> تحميل</>}
+                </button>
               </div>
             </div>
           </div>

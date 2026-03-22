@@ -80,7 +80,7 @@ export default function GoodPage() {
   const handleDownloadAll = async () => {
     setZipping(true);
     try {
-      const res = await fetchWithTimeout("/api/download", { method: "POST", timeout: 300000 }); // 5 min for ZIP
+      const res = await fetchWithTimeout("/api/download", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source: "good" }), timeout: 300000 });
       const data = await res.json();
       if (data.error) { alert(data.error); return; }
       setZipInfo(data);
