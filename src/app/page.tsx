@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { FaCloudDownloadAlt, FaSpinner, FaPlayCircle } from "react-icons/fa";
+import { FaCloudDownloadAlt, FaSpinner, FaPlayCircle, FaBroom } from "react-icons/fa";
 import Link from "next/link";
+import { fetchWithTimeout } from "@/lib/fetch";
 
 interface LogEntry {
   time: string;
@@ -153,11 +154,26 @@ export default function DownloadPage() {
           </Link>
         )}
 
-        {/* Player Link */}
-        <div className="text-center">
+        {/* Cache cleanup + Player Link */}
+        <div className="text-center space-y-3">
           <Link href="/player" className="text-text-muted hover:text-accent text-sm transition-colors">
             لديك ملفات بالفعل؟ اذهب للمشغل ←
           </Link>
+          <div>
+            <button
+              onClick={async () => {
+                if (!confirm("حذف كل الملفات المؤقتة (كاش، أرشيفات، بيانات مؤقتة)؟")) return;
+                try {
+                  const res = await fetchWithTimeout("/api/cache", { method: "DELETE" });
+                  const data = await res.json();
+                  alert(data.message || "تم التنظيف");
+                } catch { alert("فشل التنظيف"); }
+              }}
+              className="text-text-muted hover:text-danger text-xs flex items-center gap-1 mx-auto transition-colors"
+            >
+              <FaBroom /> تنظيف الكاش
+            </button>
+          </div>
         </div>
       </div>
     </main>

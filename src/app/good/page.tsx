@@ -101,6 +101,14 @@ export default function GoodPage() {
     } catch { alert("فشل"); }
   };
 
+  const handleDeleteAll = async () => {
+    if (!confirm("حذف كل ملفات المفضلة نهائياً؟")) return;
+    for (const f of files) {
+      try { await fetchWithTimeout("/api/good", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ filePath: f.path, permanent: true }) }); } catch {}
+    }
+    await fetchFiles();
+  };
+
   const totalSize = files.reduce((a, f) => a + f.size, 0);
 
   if (loading) return <main className="min-h-screen flex items-center justify-center"><div className="text-text-muted animate-pulse">جاري التحميل...</div></main>;
@@ -113,9 +121,14 @@ export default function GoodPage() {
             <h1 className="text-2xl font-bold text-text-primary">⭐ قائمة المفضلة</h1>
             <p className="text-sm text-text-muted mt-1">{files.length} ملف · {fmtSize(totalSize)}</p>
           </div>
-          <Link href="/player" className="text-sm text-accent hover:text-accent-hover flex items-center gap-1 transition">
-            <FaArrowRight /> الرجوع للمشغل
-          </Link>
+          <div className="flex gap-3 items-center">
+            {files.length > 0 && (
+              <button onClick={handleDeleteAll} className="text-sm text-danger hover:text-danger-hover transition">حذف الكل</button>
+            )}
+            <Link href="/player" className="text-sm text-accent hover:text-accent-hover flex items-center gap-1 transition">
+              <FaArrowRight /> الرجوع للمشغل
+            </Link>
+          </div>
         </div>
 
         {files.length > 0 && (
