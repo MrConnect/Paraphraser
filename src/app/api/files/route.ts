@@ -7,6 +7,7 @@ import { NextRequest } from "next/server";
 
 const MEDIA_DIR = path.join(process.cwd(), "data", "media");
 const GOOD_DIR = path.join(process.cwd(), "data", "good");
+const BAD_DIR = path.join(process.cwd(), "data", "bad");
 const THUMB_DIR = path.join(process.cwd(), "data", "thumbnails");
 const CACHE_FILE = path.join(process.cwd(), "data", "duration_cache.json");
 
@@ -14,7 +15,6 @@ const VIDEO_EXTS = [".mp4", ".webm", ".avi", ".mkv", ".flv", ".wmv", ".mov", ".m
 const AUDIO_EXTS = [".mp3", ".ogg", ".wav", ".m4a", ".flac", ".aac", ".wma"];
 const ALL_EXTS = [...VIDEO_EXTS, ...AUDIO_EXTS];
 
-// ── Cache (read-only — written by process route during extraction) ──
 let durationCache: Record<string, number> = {};
 let cacheLoaded = false;
 
@@ -50,7 +50,17 @@ function cleanEmptyParents(dirPath: string, rootDir: string) {
   }
 }
 
-// ── GET: Return files instantly — NO ffmpeg, read from cache only ──
+function moveThumb(srcPath: string, destPath: string) {
+  const oldHash = getThumbHash(srcPath);
+  const oldThumb = path.join(THUMB_DIR, `${oldHash}.jpg`);
+  const newHash = getThumbHash(destPath);
+  const newThumb = path.join(THUMB_DIR, `${newHash}.jpg`);
+  if (fs.existsSync(oldThumb)) {
+    try { fse.moveSync(oldThumb, newThumb, { overwrite: true }); } catch {}
+  }
+}
+
+// ── GET: Return files instantly — NO ffmpeg ──
 export async function GET() {
   try {
     await fse.ensureDir(MEDIA_DIR);
@@ -76,12 +86,9 @@ export async function GET() {
       }
 
       return {
-        path: relPath,
-        name: path.basename(f),
+        path: relPath, name: path.basename(f),
         type: isVideo ? "video" : "audio",
-        ext, size: stat.size,
-        duration: durationCache[key] ?? 0,
-        thumbnail,
+        ext, size: stat.size, duration: durationCache[key] ?? 0, thumbnail,
         dir: path.relative(MEDIA_DIR, path.dirname(f)).replace(/\\/g, "/"),
       };
     });
@@ -123,31 +130,26 @@ export async function DELETE(req: NextRequest) {
   }
 }
 
-// ── POST: Mark as Good ──
+// ── POST: Mark as Good or Bad ──
 export async function POST(req: NextRequest) {
   try {
-    const { filePath } = await req.json();
+    const { filePath, target } = await req.json();
     if (!filePath) return NextResponse.json({ error: "No path" }, { status: 400 });
 
+    const destDir = target === "bad" ? BAD_DIR : GOOD_DIR;
     const full = path.resolve(path.join(process.cwd(), filePath));
     if (!full.startsWith(path.resolve(MEDIA_DIR))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     if (!fs.existsSync(full)) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-    await fse.ensureDir(GOOD_DIR);
-    let dest = path.join(GOOD_DIR, path.basename(full));
+    await fse.ensureDir(destDir);
+    let dest = path.join(destDir, path.basename(full));
     if (fs.existsSync(dest)) {
       const ext = path.extname(full);
       const base = path.basename(full, ext);
-      dest = path.join(GOOD_DIR, `${base}_${Date.now()}${ext}`);
+      dest = path.join(destDir, `${base}_${Date.now()}${ext}`);
     }
     await fse.move(full, dest);
-
-    const oldHash = getThumbHash(full);
-    const oldThumb = path.join(THUMB_DIR, `${oldHash}.jpg`);
-    const newHash = getThumbHash(dest);
-    const newThumb = path.join(THUMB_DIR, `${newHash}.jpg`);
-    if (fs.existsSync(oldThumb)) await fse.move(oldThumb, newThumb, { overwrite: true });
-
+    moveThumb(full, dest);
     cleanEmptyParents(path.dirname(full), MEDIA_DIR);
     return NextResponse.json({ success: true });
   } catch (err: any) {

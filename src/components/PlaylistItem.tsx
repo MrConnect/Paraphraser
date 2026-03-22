@@ -1,6 +1,6 @@
 "use client";
 
-import { FaPlay, FaTrash, FaVolumeUp, FaVideo, FaCheck } from "react-icons/fa";
+import { FaPlay, FaTrash, FaVolumeUp, FaVideo, FaCheck, FaTimes } from "react-icons/fa";
 
 interface MediaFile {
   path: string;
@@ -30,19 +30,17 @@ function fmtSize(bytes: number): string {
 }
 
 export default function PlaylistItem({
-  file,
-  isActive,
-  onClick,
-  onDelete,
-  onMarkGood,
-  showGoodButton = true,
+  file, isActive, onClick, onDelete, onMarkGood, onMarkBad,
+  showGoodButton = true, showBadButton = true,
 }: {
   file: MediaFile;
   isActive: boolean;
   onClick: () => void;
   onDelete: () => void;
   onMarkGood?: () => void;
+  onMarkBad?: () => void;
   showGoodButton?: boolean;
+  showBadButton?: boolean;
 }) {
   const isVideo = file.type === "video";
 
@@ -55,7 +53,7 @@ export default function PlaylistItem({
           : "bg-surface-raised border border-transparent hover:border-border hover:bg-surface-overlay"
       }`}
     >
-      {/* Thumbnail — larger */}
+      {/* Thumbnail */}
       <div className="relative w-36 h-24 rounded-lg overflow-hidden bg-surface-overlay shrink-0">
         {file.thumbnail ? (
           <img src={file.thumbnail} alt={file.name} className="w-full h-full object-cover" loading="lazy" />
@@ -86,21 +84,30 @@ export default function PlaylistItem({
           {file.dir ? ` · ${file.dir}` : ""}
         </p>
 
-        {/* Action buttons */}
+        {/* Action buttons — always visible on mobile */}
         <div className="flex gap-1 mt-2 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
           {showGoodButton && onMarkGood && (
             <button
               onClick={(e) => { e.stopPropagation(); onMarkGood(); }}
               className="text-green-400 hover:text-green-300 hover:bg-green-500/10 p-1.5 rounded-lg transition text-xs"
-              title="إضافة للمفضلة"
+              title="إضافة للمفضلة (Good)"
             >
               <FaCheck />
+            </button>
+          )}
+          {showBadButton && onMarkBad && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onMarkBad(); }}
+              className="text-red-400 hover:text-red-300 hover:bg-red-500/10 p-1.5 rounded-lg transition text-xs"
+              title="نقل لقائمة Bad"
+            >
+              <FaTimes />
             </button>
           )}
           <button
             onClick={(e) => { e.stopPropagation(); onDelete(); }}
             className="text-text-muted hover:text-danger hover:bg-danger/10 p-1.5 rounded-lg transition text-xs"
-            title="حذف"
+            title="حذف نهائي"
           >
             <FaTrash />
           </button>

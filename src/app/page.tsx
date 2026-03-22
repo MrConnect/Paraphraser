@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { FaCloudDownloadAlt, FaSpinner, FaPlayCircle } from "react-icons/fa";
 import Link from "next/link";
 
@@ -16,6 +16,12 @@ export default function DownloadPage() {
   const [progress, setProgress] = useState(0);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [done, setDone] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => { abortRef.current?.abort(); };
+  }, []);
 
   const addLog = (text: string, isError = false) => {
     const time = new Date().toLocaleTimeString("ar-EG", { hour12: false });
@@ -30,11 +36,17 @@ export default function DownloadPage() {
     setLogs([]);
     setDone(false);
 
+    // Abort previous if any
+    abortRef.current?.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+
     try {
       const res = await fetch("/api/process", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: url.trim() }),
+        signal: ctrl.signal,
       });
 
       if (!res.body) throw new Error("No stream");
@@ -60,8 +72,8 @@ export default function DownloadPage() {
         setUrl("");
         setDone(true);
       }
-    } catch {
-      addLog("فشل الاتصال بالسيرفر", true);
+    } catch (err: any) {
+      if (err.name !== "AbortError") addLog("فشل الاتصال بالسيرفر", true);
     } finally {
       setProcessing(false);
     }

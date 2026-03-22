@@ -11,6 +11,7 @@ ffmpeg.setFfmpegPath(FFMPEG_PATH);
 
 const MEDIA_DIR = path.join(process.cwd(), "data", "media");
 const GOOD_DIR = path.join(process.cwd(), "data", "good");
+const BAD_DIR = path.join(process.cwd(), "data", "bad");
 
 // Quality → height mapping
 const QUALITY_MAP: Record<string, number> = {
@@ -26,7 +27,7 @@ export async function GET(req: NextRequest) {
 
   const full = path.resolve(path.join(process.cwd(), filePath));
 
-  if (!full.startsWith(path.resolve(MEDIA_DIR)) && !full.startsWith(path.resolve(GOOD_DIR))) {
+  if (!full.startsWith(path.resolve(MEDIA_DIR)) && !full.startsWith(path.resolve(GOOD_DIR)) && !full.startsWith(path.resolve(BAD_DIR))) {
     return new NextResponse("Forbidden", { status: 403 });
   }
   if (!fs.existsSync(full)) return new NextResponse("Not found", { status: 404 });

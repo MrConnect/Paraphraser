@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { FaSearch, FaBroom, FaCloudDownloadAlt, FaStar } from "react-icons/fa";
+import { FaSearch, FaBroom, FaCloudDownloadAlt, FaStar, FaBan } from "react-icons/fa";
 import dynamic from "next/dynamic";
 import PlaylistItem from "@/components/PlaylistItem";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { fetchWithTimeout } from "@/lib/fetch";
 
 const InlinePlayer = dynamic(() => import("@/components/InlinePlayer"), { ssr: false });
 
@@ -30,33 +31,40 @@ export default function PlayerPage() {
   const [loading, setLoading] = useState(true);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const fetchFiles = useCallback(async () => {
+    // Abort previous request
+    abortRef.current?.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+
     try {
-      const res = await fetch("/api/files");
+      const res = await fetchWithTimeout("/api/files", {}, ctrl.signal);
       const data = await res.json();
       const mediaFiles = data.files || [];
       setFiles(mediaFiles);
 
-      // If media empty, check good list and redirect
       if (mediaFiles.length === 0) {
         try {
-          const goodRes = await fetch("/api/good");
+          const goodRes = await fetchWithTimeout("/api/good", {}, ctrl.signal);
           const goodData = await goodRes.json();
-          if (goodData.files && goodData.files.length > 0) {
-            router.replace("/good");
-            return;
-          }
+          if (goodData.files && goodData.files.length > 0) { router.replace("/good"); return; }
         } catch {}
       }
-    } catch { console.error("Failed to load"); }
+    } catch (err: any) {
+      if (err.name !== "AbortError") console.error("Failed to load");
+    }
     finally { setLoading(false); }
   }, [router]);
 
-  useEffect(() => { fetchFiles(); }, [fetchFiles]);
+  // Cleanup on unmount
+  useEffect(() => {
+    fetchFiles();
+    return () => { abortRef.current?.abort(); };
+  }, [fetchFiles]);
 
   const filtered = useMemo(() => files.filter(f => f.name.toLowerCase().includes(search.toLowerCase())), [files, search]);
-
   useEffect(() => { setVisibleCount(PAGE_SIZE); }, [search]);
 
   useEffect(() => {
@@ -70,7 +78,6 @@ export default function PlayerPage() {
 
   const visibleItems = filtered.slice(0, visibleCount);
   const activeFile = activeIndex >= 0 && activeIndex < files.length ? files[activeIndex] : null;
-
   const playIndex = (i: number) => { setActiveIndex(files.indexOf(filtered[i])); };
 
   const handleEnded = useCallback(() => {
@@ -80,16 +87,16 @@ export default function PlayerPage() {
   const handleDelete = async (file: MediaFile) => {
     if (!confirm(`حذف "${file.name}"؟`)) return;
     try {
-      await fetch("/api/files", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: file.path }) });
+      await fetchWithTimeout("/api/files", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: file.path }) });
       const idx = files.indexOf(file);
       if (idx <= activeIndex) setActiveIndex(p => Math.max(p - 1, -1));
       await fetchFiles();
     } catch { alert("فشل الحذف"); }
   };
 
-  const handleMarkGood = async (file: MediaFile) => {
+  const handleMark = async (file: MediaFile, target: "good" | "bad") => {
     try {
-      const res = await fetch("/api/files", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ filePath: file.path }) });
+      const res = await fetchWithTimeout("/api/files", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ filePath: file.path, target }) });
       if (res.ok) {
         const idx = files.indexOf(file);
         if (idx <= activeIndex) setActiveIndex(p => Math.max(p - 1, -1));
@@ -101,7 +108,7 @@ export default function PlayerPage() {
   const handleDeleteAll = async () => {
     if (!confirm("حذف كل الملفات نهائياً؟")) return;
     try {
-      await fetch("/api/files", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ deleteAll: true }) });
+      await fetchWithTimeout("/api/files", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ deleteAll: true }) });
       setActiveIndex(-1);
       await fetchFiles();
     } catch { alert("فشل"); }
@@ -141,7 +148,8 @@ export default function PlayerPage() {
                 {audioCount > 0 && <span>🎵 {audioCount}</span>}
               </div>
               <div className="flex gap-2 items-center">
-                <Link href="/good" className="text-[11px] text-green-400 hover:text-green-300 flex items-center gap-1 transition"><FaStar /> المفضلة</Link>
+                <Link href="/good" className="text-[11px] text-green-400 hover:text-green-300 flex items-center gap-1 transition"><FaStar /> Good</Link>
+                <Link href="/bad" className="text-[11px] text-red-400 hover:text-red-300 flex items-center gap-1 transition"><FaBan /> Bad</Link>
                 <Link href="/" className="text-[11px] text-accent hover:text-accent-hover transition">+ تحميل</Link>
                 <button onClick={handleDeleteAll} className="text-[11px] text-danger hover:text-danger-hover flex items-center gap-1 transition"><FaBroom /> حذف الكل</button>
               </div>
@@ -155,7 +163,8 @@ export default function PlayerPage() {
               <>
                 {visibleItems.map((file, i) => (
                   <PlaylistItem key={file.path} file={file} isActive={files.indexOf(file) === activeIndex}
-                    onClick={() => playIndex(i)} onDelete={() => handleDelete(file)} onMarkGood={() => handleMarkGood(file)} />
+                    onClick={() => playIndex(i)} onDelete={() => handleDelete(file)}
+                    onMarkGood={() => handleMark(file, "good")} onMarkBad={() => handleMark(file, "bad")} />
                 ))}
                 {visibleCount < filtered.length && (
                   <div ref={sentinelRef} className="text-center py-3 text-text-muted text-xs">جاري تحميل المزيد... ({visibleCount}/{filtered.length})</div>
